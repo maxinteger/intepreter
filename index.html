@@ -13,6 +13,11 @@
 </head>
 <body>
 	<div class="container">
+		<h1>
+			Simple Pascal Interpreter in JS
+			&ndash;
+			<small><a href="https://ruslanspivak.com/lsbasi-part1/">Based on Ruslan's Blog</a></small>
+		</h1>
 		<div class="row">
 			<textarea name="" id="code" cols="30" rows="20">
 program part10;
@@ -52,7 +57,7 @@ end.  {part10}
 <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.1.0/jquery.min.js"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/codemirror/5.18.2/codemirror.js"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/codemirror/5.18.2/addon/lint/lint.js"></script>
-<script src="compiler.js"></script>
+<script src="compiler-alt.js"></script>
 <script>
 
 	CodeMirror.registerHelper("lint", "pascal", function (text, options) {
@@ -183,7 +188,7 @@ end.  {part10}
 			$error.hide();
 			$result.hide();
 			try{
-				var res = Interpreter().run(Parser(Lexer(myCodeMirror.getValue())).parse());
+				var res = Interpreter().run(Parser(Lexer(TERMINALS, myCodeMirror.getValue())).parse());
 				$result.html(JSON.stringify(res, null, 3)).show();
 			} catch (e){
 				$error.html(JSON.stringify(e, null, 3)).show();
