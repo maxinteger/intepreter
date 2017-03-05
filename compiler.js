@@ -32,6 +32,40 @@ const Token = (type, value) => create(null, {
 	type, value, toString: () => `(${type} ${value})`
 });
 
+const Symbol = (name, type=null) => create(null, {
+	name, type
+});
+
+const BuiltinTypeSymbol = (name) => create(Symbol(name), {
+	toString(){ return this.name }
+});
+
+const VarSymbol = (name, type) => create(Symbol(name, type), {
+	toString(){ return `<${this.name}:${this.type}>` }
+});
+
+const SymbolTable = () => create(null, {
+	_symbols: new Map(),
+
+	init(){
+		this.define(BuiltinTypeSymbol('INTEGER'));
+		this.define(BuiltinTypeSymbol('REAL'));
+		return this;
+	},
+
+	toString(){ return `Symbols: ${ this._symbols.values() }`},
+
+	define(symbol){
+		console.log(`Define: ${symbol}`);
+		this._symbols.set(symbol.name, symbol) ;
+	},
+
+	lookup(name){
+		console.log(`Lookup: ${name}`);
+		return this._symbols.get(name);
+	}
+});
+
 const RESERVED_KEYWORDS = {
 	program: Token(T.PROGRAM, '/'),
 	begin: Token(T.BEGIN, 'BEGIN'),
@@ -440,9 +474,11 @@ const Parser = (lexer) => create(null, {
 
 const Interpreter = () => create(null, {
 	GLOBAL_SCOPE: {},
+	synTable: SymbolTable().init(),
+
 	run(program){
 		this.visit(program);
-		return(this.GLOBAL_SCOPE);
+		return(this.synTable);
 	},
 	visit(node){
 		return this['visit_' + node.type](node);
@@ -454,7 +490,13 @@ const Interpreter = () => create(null, {
 		for(let declaration of node.declarations) this.visit(declaration);
 		this.visit(node.compoundStatement);
 	},
-	visit_vardecl(){},
+	visit_vardecl(node){
+		const typeName = node.typeNode.value;
+		const typeSymbol = this.synTable.lookup(typeName);
+		const varName = node.varNode.value;
+		const varSymbol = VarSymbol(varName, typeSymbol);
+		this.synTable.define(varSymbol);
+	},
 	visit_type(){},
 	visit_binop(node){
 		switch(node.op.type){
@@ -481,13 +523,21 @@ const Interpreter = () => create(null, {
 	visit_noop(node){},
 	visit_var(node){
 		let name = node.value;
-		let value = this.GLOBAL_SCOPE[name];
-		if (value === undefined) throw `Name error ${name}`;
+		let symbol = this.synTable.lookup(name);
+		if (symbol === void 0) {
+			throw new Error(`Name error ${name}`)
+		}
 		else return value;
 	},
 	visit_assign(node){
 		let varName = node.left.value;
-		this.GLOBAL_SCOPE[varName] = this.visit(node.right);
+		console.log(varName);
+		let varSymbol = this.synTable.lookup(varName);
+		if(varSymbol === void 0){
+			throw new Error(`Name error ${varName}`)
+		}
+		this.visit(node.right);
+		this.visit(node.right);
 	}
 });
 

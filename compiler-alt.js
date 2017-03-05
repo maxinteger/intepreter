@@ -1,37 +1,97 @@
 'use strict';
 
+const identity = (x) => x;
+
+const reRegExpChar = /[\\^$.*+?()[\]{}|]/g;
+const reHasRegExpChar = RegExp(reRegExpChar.source);
+
+function escapeRegExp(string) {
+	return (string && reHasRegExpChar.test(string))
+		? string.replace(reRegExpChar, '\\$&')
+		: string;
+}
+
 const create = (parent, body={}) => Object.assign(Object.create(parent), body);
 
 
-/*
- TOKENIZER
-*/
+const showError = (message, text, pos) => {
+	let end = text.indexOf('\n', pos);
+	end = end === -1 ? text.length : end;
+	let start = Math.max(0, text.lastIndexOf('\n', end - 1));
+	let line = (text.substr(0, start).match(/\n/mg) || []).length + 1;
+	let col = pos - start;
+
+	return {line, col, message}
+};
+
+
 const T = {
+	WHITE_SPACE: '<white space>',
+
+	//COMMENT: '<comment>',
+	COMMENT_BLOCK: '<comment block>',
+
+	BOOL: 'bool',
+	NUMBER: 'number',
+	STRING: 'string',
+	ID: 'id',
+
+	// keywords
 	PROGRAM: 'PROGRAM',
 	VAR: 'VAR',
 	INTEGER_CONST: 'INTEGER',
 	REAL_CONST: 'REAL',
-	ID: 'ID',
-	ASSIGN: 'ASSIGN',
-	SEMI: 'SEMI',
-	DOT: 'DOT',
+	BEGIN: 'BEGIN',
+	END: 'END',
+	DIV: 'div',
+	ASSIGN: ':=',
+
+	// operators
 	PLUS: '+',
 	MINUS: '-',
 	MUL: '*',
-	DIV: 'div',
 	FLOAT_DIV: '/',
-	LPAREN: '(',
-	RPAREN: ')',
+
+	// separators
+	L_PAREN: '(',
+	R_PAREN: ')',
 	COLON: ':',
 	COMMA: ',',
-	BEGIN: 'BEGIN',
-	END: 'END',
+	SEMI: ';',
+
+	// endings
+	DOT: '.',
 	EOF: 'EOF'
 };
 
 const Token = (type, value) => create(null, {
 	type, value, toString: () => `(${type} ${value})`
 });
+
+
+const Terminal = (type, start, match, parse=identity, containsValue=true, skippable=false, skipWrappers=false) => ({
+	type, start, match, skippable, skipWrappers,
+	token: (val) => Token(type, parse(val))
+});
+
+const SimpleTerminal = (type, str) =>
+	Terminal(type, new RegExp(`${escapeRegExp(str[0])}`,'i'), str, identity, false);
+
+let TERMINALS = [];
+const excludeTokens = ['WHITE_SPACE', 'COMMENT_BLOCK', 'BOOL', 'NUMBER', 'STRING', 'ID'];
+for (let type in T){
+	if (!excludeTokens.includes(type)){
+		TERMINALS.push(SimpleTerminal(T[type], T[type]));
+	}
+}
+TERMINALS = TERMINALS.concat(TERMINALS, [
+	Terminal(T.WHITE_SPACE, 	/\s/, 						/^\s+$/,					identity,			 false, true),
+	Terminal(T.COMMENT_BLOCK, 	/\{/, 						/^\{[^}]*\}$/,				identity,			 false, true),
+	Terminal(T.BOOL, 			/(t|b)/, 					/^(true|false)$/i, 			val => val.toLowerCase() === 'true'),
+	Terminal(T.NUMBER, 			/\d/, 						/^(\d+(\.\d*)?)$/, 			parseFloat),
+	Terminal(T.STRING, 			/"/, 						/^((?:[^"\\]|\\.)*)$/,		identity,			 true, false, true),
+	Terminal(T.ID, 				/[=!_\-+*a-zA-Z]/, 		    /^([=!_\-+*a-zA-Z][!_\-+*\w]*)$/)
+])
 
 const RESERVED_KEYWORDS = {
 	program: Token(T.PROGRAM, '/'),
@@ -43,19 +103,71 @@ const RESERVED_KEYWORDS = {
 	div: Token(T.DIV, '/'),
 };
 
+const Lexer = (terminals, text) => create(null, {
+	terminals,
+	text,
+	pos: 0,
+	currentToken: null,
+	currentChar: text[0],
 
-const showError = (message, text, pos) => {
-	let end = text.indexOf('\n', pos);
-	end = end === -1 ? text.length : end;
-	let start = Math.max(0, text.lastIndexOf('\n', end - 1));
-	let line = (text.substr(0, start).match(/\n/mg) || []).length + 1;
-	let col = pos - start;
+	error(){
+		const {line, col, message} = showError(this.text, this.pos);
+		throw `Invalid character in line ${line}:${col}\n${message}`;
+	},
+	hasNext(){
+		return this.currentChar !== undefined;
+	},
+	readNext(){
+		this.currentChar = this.text[++this.pos];
+	},
+	peek(){
+		return this.text[this.pos + 1];
+	},
+	readAhead(n){
+		return this.text.substr(this.pos, n);
+	},
+	skip(n){
+		this.pos += n;
+		this.currentChar = this.text[this.pos];
+	},
+	readTerminal(terminal){
+		if (terminal.skipWrappers) this.readNext();
+		if (terminal.match instanceof RegExp){
+			let result = this.currentChar;
+			while (this.hasNext() && this.peek() !== undefined && terminal.match.test(result + this.peek())) {
+				this.readNext();
+				result += this.currentChar;
+			}
+			if (terminal.skipWrappers) this.readNext();
+			this.readNext();
+			return terminal.token(result);
+		} else if(typeof terminal.match === 'string'){
+			let len = terminal.match.length;
+			let t = this.readAhead(len);
+			if (t.toUpperCase() === terminal.match.toUpperCase()){
+				this.skip(len);
+				return terminal.token(t);
+			} else {
+				return null;
+			}
+		}
+	},
+	getNextToken(){
+		while (this.hasNext()) {
+			for (let terminal of this.terminals) {
+				if (terminal.start.test(this.currentChar)) {
+					const res = this.readTerminal(terminal);
+					console.log(res);
+					if (res === null || !terminal.skippable) return res;
+				}
+			}
+			this.error();
+		}
+		return Token(T.EOF, null);
+	}
+});
 
-	return {line, col,message}
-};
-
-
-const Lexer = (text) => create(null, {
+const Lexer_OLD = (text) => create(null, {
 	text,
 	pos: 0,
 	currentToken: null,
@@ -491,5 +603,3 @@ const Interpreter = () => create(null, {
 		this.GLOBAL_SCOPE[varName] = this.visit(node.right);
 	}
 });
-
-
